@@ -614,13 +614,13 @@ Sincerely,
             st.markdown(
                 f'''<a href="{mailto_link}" target="_blank" style="text-decoration:none;">
                     <button style="width:100%; height:45px; background-color:#0066cc; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">
-                        ✉️ Abrir no E-mail
+                        ✉️ Denunciar por E-mail
                     </button>
                 </a>''',
                 unsafe_allow_html=True
             )
         with col_act2:
-            st.caption("Ao clicar em 'Abrir no E-mail', seu cliente padrão (ex: Outlook) será aberto com os destinatários, assunto e corpo já preenchidos.")
+            st.caption("Ao clicar em 'Denunciar por E-mail', seu cliente padrão (ex: Outlook) será aberto com os destinatários, assunto e corpo já preenchidos para envio da denúncia.")
 
         # --- ABAS DE DETALHES ---
         tab_denuncia, tab_auth, tab_whois, tab_links, tab_anexos, tab_raw = st.tabs([

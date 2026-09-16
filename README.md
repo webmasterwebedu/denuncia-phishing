@@ -20,7 +20,7 @@ Aplicação corporativa desenvolvida em **Streamlit** para análise forense simp
   - Lista arquivos anexados, tipo MIME, tamanho e calcula o hash **SHA-256**, alertando sobre extensões perigosas.
 - **Geração de Denúncias Prontas para Envio**:
   - Modelos profissionais em **Português (Brasil)** e **English (International)**.
-  - Botão **✉️ Abrir no E-mail** (`mailto:`) que preenche automaticamente Destinatário, Cópia (CC com CERT.br e registrars), Assunto e Corpo no cliente de e-mail padrão.
+  - Botão **✉️ Denunciar por E-mail** (`mailto:`) que preenche automaticamente Destinatário, Cópia (CC com CERT.br e registrars), Assunto e Corpo no cliente de e-mail padrão.
 
 ---
 
@@ -57,6 +57,7 @@ streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 1. **Upload**: Carregue o arquivo `.eml` suspeito na aplicação.
 2. **Diagnóstico**: A ferramenta avalia automaticamente o risco, identifica spoofing e contatos de abuse dos provedores.
 3. **Envio**:
-   - Clique em **✉️ Abrir no E-mail** ou copie o texto estruturado com os IOCs.
+   - Clique em **✉️ Denunciar por E-mail** ou copie o texto estruturado com os IOCs.
    - Envie a notificação para o provedor de envio e coloque o CERT.br e registrars em cópia para derrubada da fraude.
+
 
