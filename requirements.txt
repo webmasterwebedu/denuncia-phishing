@@ -1,2 +1,4 @@
 streamlit
 python-whois
+beautifulsoup4
+requests

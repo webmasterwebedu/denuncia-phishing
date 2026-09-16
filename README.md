@@ -1,56 +1,62 @@
-# Gerador de Denúncia de Phishing
+# 🛡️ Gerador de Denúncia de Phishing & SPAM (SOC / CSIRT)
 
-Este projeto é uma aplicação em Streamlit para analisar arquivos `.eml` de phishing, extrair indicadores do e-mail e montar um texto de denúncia para enviar ao provedor ou à equipe de abuso.
+Aplicação corporativa desenvolvida em **Streamlit** para análise forense simplificada de arquivos `.eml`, detecção de indicadores de comprometimento (IOCs), consultas automáticas de WHOIS/RDAP e geração ágil de denúncias de *abuse* (takedown e bloqueio).
 
-## Funcionalidades
+---
 
-- Upload de arquivos `.eml`
-- Extração de remetente, IP de origem, data/hora e corpo do e-mail
-- Identificação de domínios encontrados nos links
-- Busca automática de contatos de abuse via WHOIS
-- Geração de texto pronto para denúncia
+## ✨ Funcionalidades Principais
 
-## Requisitos
+- **Análise Completa de Cabeçalhos (.eml)**:
+  - Extração de `Subject`, `Date`, `From`, `Return-Path`, `Reply-To` e `Message-ID`.
+  - **Detecção de Spoofing**: Compara o remetente visível com o envelope real e analisa os resultados de **SPF, DKIM e DMARC**.
+- **Rastreamento Inteligente de IP de Origem**:
+  - Percorre todos os saltos (`Received:`) ignorando redes privadas/locais para identificar o IP público real de envio.
+- **Inteligência de WHOIS & RDAP**:
+  - Consulta automática de provedor/hosting, ASN e e-mails de `abuse` para o **IP remetente**, o **domínio remetente** e os **domínios maliciosos nos links**.
+- **Inspeção de Links & URLs**:
+  - Extração com BeautifulSoup identificando links mascarados (*mismatched links* onde o texto exibido difere do link real).
+  - Opção de **Desarmar URLs (Defanging)** (`hxxps://`, `[.]`) para envio seguro sem bloqueio por antivírus.
+- **Inspeção de Anexos**:
+  - Lista arquivos anexados, tipo MIME, tamanho e calcula o hash **SHA-256**, alertando sobre extensões perigosas.
+- **Geração de Denúncias Prontas para Envio**:
+  - Modelos profissionais em **Português (Brasil)** e **English (International)**.
+  - Botão **✉️ Abrir no E-mail** (`mailto:`) que preenche automaticamente Destinatário, Cópia (CC com CERT.br e registrars), Assunto e Corpo no cliente de e-mail padrão.
 
-- Python 3.9+
-- pip
+---
 
-## Como instalar
+## 🚀 Instalação e Execução
 
+### 1. Criar e ativar o ambiente virtual:
+
+**Windows:**
 ```bash
 python -m venv venv
-```
-
-No Windows:
-
-```bash
 venv\Scripts\activate
 ```
 
-No macOS/Linux:
-
+**Linux / macOS:**
 ```bash
+python3 -m venv venv
 source venv/bin/activate
 ```
 
-Em seguida:
-
+### 2. Instalar dependências:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Como executar
-
+### 3. Executar o servidor:
 ```bash
-streamlit run app.py
+streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 ```
 
-## Como usar
+---
 
-1. Abra a aplicação no navegador.
-2. Faça upload de um arquivo `.eml`.
-3. Veja os indicadores extraídos e copie o texto de denúncia gerado.
+## 🎯 Fluxo de Denúncia
 
-## Observação
+1. **Upload**: Carregue o arquivo `.eml` suspeito na aplicação.
+2. **Diagnóstico**: A ferramenta avalia automaticamente o risco, identifica spoofing e contatos de abuse dos provedores.
+3. **Envio**:
+   - Clique em **✉️ Abrir no E-mail** ou copie o texto estruturado com os IOCs.
+   - Envie a notificação para o provedor de envio e coloque o CERT.br e registrars em cópia para derrubada da fraude.
 
-Este projeto foi preparado para publicação no GitHub, mas ainda não foi enviado para o repositório remoto.
