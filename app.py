@@ -411,6 +411,31 @@ st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores téc
 
 uploaded_file = st.file_uploader("📂 Arraste ou selecione o arquivo .eml para análise", type=["eml"])
 
+if uploaded_file is None:
+    st.markdown("---")
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        st.markdown("""
+        ### 🔍 Análise Forense e Anti-Spoofing
+        * **Detecção instantânea de falhas em SPF, DKIM e DMARC.**
+        * **Comparação automática de remetente visível (`From`) com o envelope real (`Return-Path`).**
+        * **Rastreamento dos saltos (`Received:`) para achar o IP público real de envio.**
+
+        ### 🌐 Inteligência de WHOIS e Provedores
+        * **Consulta automática de IP / RDAP** (identifica se veio de AWS, DigitalOcean, Locaweb, etc.).
+        * **Consulta de WHOIS de Domínios** dos links no corpo do e-mail.
+        """)
+        
+    with col_info2:
+        st.markdown("""
+        ### 🎯 Geração e Envio Ágil de Denúncia
+        * **Para (TO):** Provedor de hospedagem do IP de disparo (para suspensão).
+        * **Em Cópia (CC):** Registrars dos links falsos e `mail-abuse@cert.br` (**CERT.br**).
+        * **Botão ✉️ Denunciar por E-mail:** Abre o cliente de e-mail com tudo preenchido em 1 clique.
+        * **Desarmamento de URLs (Defang):** Previne cliques acidentais e bloqueio por antivírus (`hxxps://`, `[.]`).
+        * **Inspeção de Anexos:** Cálculo de hash **SHA-256** e alerta de arquivos de alto risco (`.exe`, `.iso`, `.zip`, etc.).
+        """)
+
 if uploaded_file is not None:
     try:
         raw_email = uploaded_file.read()
