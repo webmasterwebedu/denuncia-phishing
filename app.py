@@ -510,6 +510,10 @@ def lookup_virustotal_file_hash(sha256: str, api_key: str) -> dict:
 
 # ----------------- INTERFACE PRINCIPAL ----------------- #
 
+if os.path.exists("logo.png"):
+    st.sidebar.image("logo.png", use_container_width=True)
+    st.sidebar.markdown("---")
+
 st.sidebar.markdown("## ⚙️ Configurações")
 
 idioma = st.sidebar.selectbox(
@@ -564,9 +568,17 @@ st.sidebar.markdown(
     """
 )
 
-# Cabeçalho Principal
-st.title("🛡️ Central de Análise e Denúncia de Phishing & SPAM")
-st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
+# Cabeçalho Principal com Logo
+if os.path.exists("logo.png"):
+    col_hdr_logo, col_hdr_txt = st.columns([1, 4])
+    with col_hdr_logo:
+        st.image("logo.png", width=180)
+    with col_hdr_txt:
+        st.title("Central de Análise e Denúncia de Phishing & SPAM")
+        st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
+else:
+    st.title("🛡️ Central de Análise e Denúncia de Phishing & SPAM")
+    st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
 
 uploaded_file = st.file_uploader("📂 Arraste ou selecione o arquivo .eml para análise", type=["eml"])
 
