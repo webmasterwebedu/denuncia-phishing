@@ -69,6 +69,18 @@ def is_public_ip(ip_str: str) -> bool:
     except ValueError:
         return False
 
+def are_domains_aligned(dom1: str, dom2: str) -> bool:
+    """Verifica se dois domínios pertencem à mesma organização ou se um é subdomínio do outro (ex: mail.netskope.com e netskope.com)."""
+    if not dom1 or not dom2:
+        return False
+    d1 = dom1.lower().strip()
+    d2 = dom2.lower().strip()
+    if d1 == d2:
+        return True
+    if d1.endswith("." + d2) or d2.endswith("." + d1):
+        return True
+    return False
+
 def extract_origin_ips(msg) -> tuple[str, list[str]]:
     """Extrai todos os IPs públicos encontrados nos cabeçalhos Received e outros cabeçalhos de origem."""
     public_ips = []
@@ -141,6 +153,7 @@ def parse_auth_results(msg) -> dict:
         auth_data["is_spoofed_suspect"] = True
         
     return auth_data
+
 
 def defang_text(text: str) -> str:
     """Desarma URLs, domínios e e-mails para envio seguro de denúncia sem ativar antivírus ou filtros."""
@@ -480,12 +493,16 @@ if uploaded_file is not None:
         remetente_dominio = sender_email.split('@')[-1].lower() if '@' in sender_email else "desconhecido.com"
         return_path_dominio = return_path.split('@')[-1].lower() if '@' in return_path else ""
         
-        # Detecção de Spoofing
+        # Detecção de Spoofing e Autenticidade
         spoofing_detectado = False
-        if return_path_dominio and remetente_dominio and return_path_dominio != remetente_dominio:
-            spoofing_detectado = True
+        autenticacao_valida = (auth_info["spf"] == "PASS" and auth_info["dkim"] == "PASS" and auth_info["dmarc"] == "PASS")
+        alinhamento_valido = are_domains_aligned(return_path_dominio, remetente_dominio)
+        
         if auth_info["is_spoofed_suspect"]:
             spoofing_detectado = True
+        elif return_path_dominio and remetente_dominio:
+            if not alinhamento_valido and not (autenticacao_valida and auth_info["dmarc"] == "PASS"):
+                spoofing_detectado = True
 
         # 7. Consultas WHOIS & RDAP
         with st.spinner("🔍 Consultando bases WHOIS e RDAP para identificar provedores e contatos de abuse..."):
@@ -536,13 +553,16 @@ if uploaded_file is not None:
             motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
         if any(a.get("is_suspicious") for a in anexos):
             motivos_risco.append("⚠️ Anexo com extensão de alto risco detectado")
-        if dominios_links:
-            motivos_risco.append(f"🔗 {len(dominios_links)} domínio(s) externo(s) detectado(s) no corpo")
             
         st.markdown("---")
         col_res1, col_res2 = st.columns([1, 2])
         with col_res1:
-            st.metric(label="Diagnóstico da Mensagem", value="🔴 Suspeita / Maliciosa" if motivos_risco else "🟢 Sem Alertas Graves")
+            if motivos_risco:
+                st.metric(label="Diagnóstico da Mensagem", value="🔴 Suspeita / Phishing", delta="Alto Risco", delta_color="inverse")
+            elif autenticacao_valida and (alinhamento_valido or auth_info["dmarc"] == "PASS"):
+                st.metric(label="Diagnóstico da Mensagem", value="🟢 Autêntica / Legítima", delta="SPF, DKIM e DMARC Válidos")
+            else:
+                st.metric(label="Diagnóstico da Mensagem", value="🟡 Sem Alertas Graves", delta="Informativa")
         with col_res2:
             st.markdown(f"**Assunto:** `{subject}`")
             st.markdown(f"**Remetente:** `{sender_email}` | **IP de Envio:** `{ip_origem}` ({ip_info.get('org', 'Desconhecido')})")
@@ -677,9 +697,13 @@ Sincerely,
             st.markdown(f"- **Reply-To:** `{reply_to_raw or 'Igual ao remetente'}`")
             
             if spoofing_detectado:
-                st.error("⚠️ **ALERTA DE SPOOFING / REMETENTE FORJADO:** Houve divergência entre o remetente visível e o envelope real ou falha na validação SPF/DKIM.")
+                st.error("⚠️ **ALERTA DE SPOOFING / REMETENTE FORJADO:** Houve divergência entre o remetente visível e o envelope real ou falha na validação SPF/DKIM/DMARC.")
+            elif autenticacao_valida and alinhamento_valido:
+                st.success(f"✅ **MENSAGEM AUTÊNTICA:** O remetente (`{remetente_dominio}`) e o envelope (`{return_path_dominio}`) pertencem ao mesmo domínio/organização e todas as assinaturas criptográficas (SPF, DKIM e DMARC) foram validadas com sucesso (PASS).")
+            elif autenticacao_valida:
+                st.success("✅ **AUTENTICAÇÃO APROVADA:** As assinaturas SPF, DKIM e DMARC foram validadas com sucesso (PASS).")
             else:
-                st.success("✅ Sem divergência evidente de domínio entre From e Return-Path.")
+                st.info("ℹ️ Não foram encontradas divergências evidentes de identidade.")
 
         with tab_whois:
             st.subheader("Informações do Servidor de Origem e Provedores")
