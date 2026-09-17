@@ -838,37 +838,49 @@ if uploaded_file is not None:
         to_str = ", ".join(destinatarios_to)
         cc_str = ", ".join(destinatarios_cc)
 
-        # --- AVALIAÇÃO DE RISCO ---
+        # --- AVALIAÇÃO DE RISCO (PADRÃO GMAIL / GOOGLE WORKSPACE) ---
         motivos_risco = []
-        if auth_info.get("is_spam_flagged"):
-            motivos_risco.append(auth_info["spam_verdict"])
-        if spoofing_detectado:
-            motivos_risco.append("⚠️ Possível Remetente Forjado (Spoofing) ou Falha em SPF/DKIM/DMARC")
-        if auth_info.get("is_unauthenticated"):
-            motivos_risco.append("⚠️ Mensagem Não Autenticada (Sem registros válidos de SPF/DKIM/DMARC)")
-        if reply_to_divergente:
-            motivos_risco.append(f"⚠️ Reply-To Divergente do Remetente (`{reply_to}` != `{sender_email}`)")
-        if any(l.get("mismatched") for l in links_detectados):
-            motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
-        if any(a.get("is_suspicious") for a in anexos):
-            motivos_risco.append("⚠️ Anexo com extensão de alto risco detectado")
+        motivos_atencao = []
+
+        # 1. AMEAÇAS CRÍTICAS / PHISHING (Bandeira Vermelha do Gmail)
         if vt_links_detectados_maliciosos > 0:
             motivos_risco.append(f"🚨 {vt_links_detectados_maliciosos} link(s) confirmado(s) como MALICIOSO(S) pelo VirusTotal!")
         if vt_anexos_detectados_maliciosos > 0:
             motivos_risco.append(f"🚨 {vt_anexos_detectados_maliciosos} anexo(s) confirmado(s) como MALWARE pelo VirusTotal!")
-            
+        if any(a.get("is_suspicious") for a in anexos):
+            motivos_risco.append("⚠️ Anexo com extensão executável/perigosa detectado (.exe, .iso, .vbs, .scr, etc.)")
+        if any(l.get("mismatched") for l in links_detectados):
+            motivos_risco.append("⚠️ Link Discrepante Detectado (Texto visível mascara um destino diferente)")
+        if spoofing_detectado:
+            motivos_risco.append("⚠️ Falha em Autenticação / Remetente Falsificado (Spoofing confirmado)")
+        if auth_info.get("is_spam_flagged") and auth_info.get("ms_metrics", {}).get("cat") in ["PHSH", "HPHSH", "MALW"]:
+            motivos_risco.append(auth_info["spam_verdict"])
+
+        # 2. AVISOS DE ATENÇÃO / INFORMATIVOS (Não tornam a mensagem Phishing automaticamente)
+        if auth_info.get("is_spam_flagged") and auth_info.get("ms_metrics", {}).get("cat") not in ["PHSH", "HPHSH", "MALW"]:
+            motivos_atencao.append(auth_info["spam_verdict"])
+        if auth_info.get("is_unauthenticated"):
+            motivos_atencao.append("ℹ️ Mensagem sem registros estritos de SPF/DKIM.")
+        if reply_to_divergente:
+            motivos_atencao.append(f"ℹ️ Reply-To (`{reply_to}`) difere de From (`{sender_email}`).")
+
         st.markdown("---")
         col_res1, col_res2 = st.columns([1, 2])
         with col_res1:
             if motivos_risco:
                 st.metric(label="Diagnóstico da Mensagem", value="🔴 Suspeita / Phishing", delta="Alto Risco", delta_color="inverse")
-            elif autenticacao_valida and (alinhamento_valido or auth_info["dmarc"] == "PASS"):
-                st.metric(label="Diagnóstico da Mensagem", value="🟢 Autêntica / Legítima", delta="SPF, DKIM e DMARC Válidos")
+            elif (auth_info["spf"] == "PASS" or auth_info["dkim"] == "PASS") and (alinhamento_valido or auth_info["dmarc"] == "PASS"):
+                st.metric(label="Diagnóstico da Mensagem", value="🟢 Autêntica / Legítima", delta="SPF / DKIM / DMARC Válidos")
             else:
                 st.metric(label="Diagnóstico da Mensagem", value="🟡 Sem Alertas Graves", delta="Informativa")
         with col_res2:
             st.markdown(f"**Assunto:** `{subject}`")
             st.markdown(f"**Remetente:** `{sender_email}` | **IP de Envio:** `{ip_origem}` ({ip_info.get('org', 'Desconhecido')})")
+
+        # Exibição de alertas críticos se houver
+        if motivos_risco:
+            for m in motivos_risco:
+                st.error(m)
 
         # 9. GERAÇÃO DOS MODELOS DE DENÚNCIA
         links_formatados = "\n".join([f"- {defang_text(l['url']) if aplicar_defang else l['url']} (Domínio: {defang_text(l['domain']) if aplicar_defang else l['domain']})" for l in links_detectados]) if links_detectados else "Nenhum link detectado."
