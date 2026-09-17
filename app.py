@@ -381,6 +381,7 @@ def lookup_ip_rdap(ip: str) -> dict:
 @st.cache_data(ttl=3600, show_spinner=False)
 def lookup_virustotal_url(url: str, api_key: str) -> dict:
     """Consulta reputação e análise de 70+ antivírus de uma URL no VirusTotal API v3."""
+    url_sha256 = hashlib.sha256(url.encode()).hexdigest()
     res = {
         "scanned": False,
         "malicious": 0,
@@ -390,6 +391,7 @@ def lookup_virustotal_url(url: str, api_key: str) -> dict:
         "total_engines": 0,
         "flagged_by": [],
         "url_id": "",
+        "url_sha256": url_sha256,
         "status": "Não consultado"
     }
     if not api_key or not url:
@@ -430,7 +432,25 @@ def lookup_virustotal_url(url: str, api_key: str) -> dict:
                 res["status"] = "Concluído"
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            res["status"] = "Não catalogado no VirusTotal (URL Nova/Desconhecida)"
+            # Submete a URL nova para análise no VirusTotal
+            try:
+                import urllib.parse
+                post_data = urllib.parse.urlencode({"url": url}).encode("utf-8")
+                post_req = urllib.request.Request(
+                    "https://www.virustotal.com/api/v3/urls",
+                    data=post_data,
+                    headers={
+                        "x-apikey": api_key.strip(),
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                        "User-Agent": "PhishingAnalyzer/1.0"
+                    }
+                )
+                with urllib.request.urlopen(post_req, timeout=5) as post_resp:
+                    if post_resp.status in (200, 201):
+                        res["status"] = "URL enviada para verificação no VirusTotal (Aguardando fila de análise)"
+            except Exception:
+                res["status"] = "Não catalogado no VirusTotal (URL Nova/Desconhecida)"
             res["scanned"] = True
         elif e.code in (401, 403):
             res["status"] = "Chave de API do VirusTotal inválida ou sem permissão"
@@ -915,8 +935,8 @@ Sincerely,
                         st.markdown(f"- **Domínio:** `{l['domain']}`")
                         
                         vt = l.get("vt")
-                        url_id = base64.urlsafe_b64encode(l["url"].encode()).decode().rstrip("=")
-                        vt_url_link = f"https://www.virustotal.com/gui/url/{url_id}"
+                        url_sha256 = hashlib.sha256(l["url"].encode()).hexdigest()
+                        vt_url_link = f"https://www.virustotal.com/gui/url/{url_sha256}"
                         vt_domain_link = f"https://www.virustotal.com/gui/domain/{l['domain']}"
                         
                         if vt and vt.get("scanned"):
