@@ -148,6 +148,36 @@ streamlit run app.py
 
 ---
 
+## 🛡️ Regras de Firewall e Portas de Rede
+
+Para que o servidor funcione perfeitamente dentro da rede corporativa ou na nuvem, configure as seguintes regras no Firewall / UTM / Security Group:
+
+### 📥 1. Tráfego de Entrada (Inbound / Acesso dos Analistas e Usuários)
+
+| Porta | Protocolo | Origem Permitida | Finalidade |
+| :--- | :--- | :--- | :--- |
+| **80** | TCP | Rede Corporativa / VPN | Acesso HTTP via Proxy Reverso (Apache/Nginx) |
+| **443** | TCP | Rede Corporativa / VPN | Acesso HTTPS seguro via Proxy Reverso (Recomendado) |
+| **8501** | TCP | Rede Corporativa / VPN | Acesso direto ao Streamlit (caso não utilize Proxy Reverso) |
+| **22** | TCP | IPs dos Administradores | Acesso administrativo e deploy via SSH |
+
+---
+
+### 📤 2. Tráfego de Saída (Outbound / Consultas Forenses e Inteligência de Ameaças)
+
+O servidor precisa realizar consultas externas para coletar dados forenses, consultar provedores e verificar reputação:
+
+| Porta | Protocolo | Destinos / Domínios | Finalidade |
+| :--- | :--- | :--- | :--- |
+| **43** | TCP | Qualquer / Servidores de WHOIS | Consultas diretas de **WHOIS** (`whois.registro.br`, `whois.iana.org`, etc.) |
+| **443** | TCP | `www.virustotal.com`, `rdap.*` | Consultas à **API do VirusTotal (v3)** e protocolo **RDAP oficial** (ARIN, LACNIC) |
+| **80** | TCP | `ip-api.com` | Fallback rápido para geolocalização e identificação de provedores/ASN |
+| **53** | UDP / TCP | Servidores DNS | Resolução de nomes para consultas externas |
+
+> 📌 **Atenção:** Em redes corporativas com inspeção estrita de tráfego, certifique-se de que a porta **43/TCP** (protocolo WHOIS) não seja bloqueada pelo firewall de saída, pois ela é essencial para identificar os contatos de abuse dos registrars.
+
+---
+
 ## 🎯 Fluxo de Denúncia
 
 1. **Upload**: Carregue o arquivo `.eml` suspeito na aplicação.
