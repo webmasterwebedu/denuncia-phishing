@@ -911,21 +911,25 @@ Sincerely,
                         st.markdown(f"- **Domínio:** `{l['domain']}`")
                         
                         vt = l.get("vt")
+                        url_id = base64.urlsafe_b64encode(l["url"].encode()).decode().rstrip("=")
+                        vt_url_link = f"https://www.virustotal.com/gui/url/{url_id}"
+                        vt_domain_link = f"https://www.virustotal.com/gui/domain/{l['domain']}"
+                        
                         if vt and vt.get("scanned"):
                             mal = vt.get("malicious", 0)
                             tot = vt.get("total_engines", 0)
                             if mal > 0:
-                                st.error(f"🚨 **VirusTotal:** {mal}/{tot} antivírus detectaram ameaça! Flagged by: {', '.join(vt.get('flagged_by', [])[:4])}")
+                                st.error(f"🚨 **VirusTotal:** {mal}/{tot} antivírus detectaram ameaça! ({', '.join(vt.get('flagged_by', [])[:4])})")
                             elif tot > 0:
                                 st.success(f"🟢 **VirusTotal:** 0/{tot} antivírus detectaram ameaça (Link Limpo)")
                             else:
                                 st.warning(f"⚪ **VirusTotal:** {vt.get('status', 'Sem detecções')}")
-                            if vt.get("url_id"):
-                                st.markdown(f"[🔗 Ver análise completa no VirusTotal](https://www.virustotal.com/gui/url/{vt['url_id']})")
+                            st.markdown(f"[🔗 Ver análise da URL no VirusTotal]({vt_url_link}) | [🌐 Ver análise do Domínio ({l['domain']})]({vt_domain_link})")
                         elif vt and vt.get("status"):
                             st.caption(f"🛡️ VirusTotal: {vt['status']}")
+                            st.markdown(f"[🔗 Abrir URL no VirusTotal]({vt_url_link}) | [🌐 Abrir Domínio ({l['domain']})]({vt_domain_link})")
                         else:
-                            st.markdown(f"[🔗 Consultar no VirusTotal manualmente](https://www.virustotal.com/gui/search/{quote(l['url'])})")
+                            st.markdown(f"[🔗 Abrir URL no VirusTotal]({vt_url_link}) | [🌐 Abrir Domínio ({l['domain']})]({vt_domain_link})")
                         st.divider()
             else:
                 st.info("Nenhuma URL externa encontrada no corpo da mensagem.")
