@@ -6,6 +6,8 @@ import re
 import ipaddress
 import hashlib
 import json
+import base64
+import os
 import urllib.request
 from urllib.parse import urlparse, quote
 from html.parser import HTMLParser
@@ -376,6 +378,136 @@ def lookup_ip_rdap(ip: str) -> dict:
 
     return data
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def lookup_virustotal_url(url: str, api_key: str) -> dict:
+    """Consulta reputação e análise de 70+ antivírus de uma URL no VirusTotal API v3."""
+    res = {
+        "scanned": False,
+        "malicious": 0,
+        "suspicious": 0,
+        "harmless": 0,
+        "undetected": 0,
+        "total_engines": 0,
+        "flagged_by": [],
+        "url_id": "",
+        "status": "Não consultado"
+    }
+    if not api_key or not url:
+        return res
+
+    try:
+        url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+        res["url_id"] = url_id
+        req = urllib.request.Request(
+            f"https://www.virustotal.com/api/v3/urls/{url_id}",
+            headers={
+                "x-apikey": api_key.strip(),
+                "Accept": "application/json",
+                "User-Agent": "PhishingAnalyzer/1.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=6) as response:
+            if response.status == 200:
+                payload = json.loads(response.read().decode('utf-8'))
+                data = payload.get("data", {})
+                attr = data.get("attributes", {})
+                stats = attr.get("last_analysis_stats", {})
+                results = attr.get("last_analysis_results", {})
+                
+                res["scanned"] = True
+                res["malicious"] = stats.get("malicious", 0)
+                res["suspicious"] = stats.get("suspicious", 0)
+                res["harmless"] = stats.get("harmless", 0)
+                res["undetected"] = stats.get("undetected", 0)
+                res["total_engines"] = sum(stats.values()) if stats else 0
+                
+                flagged = []
+                for engine, eng_data in results.items():
+                    category = eng_data.get("category", "")
+                    if category in ["malicious", "suspicious"]:
+                        flagged.append(f"{engine} ({eng_data.get('result', category)})")
+                res["flagged_by"] = flagged
+                res["status"] = "Concluído"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            res["status"] = "Não catalogado no VirusTotal (URL Nova/Desconhecida)"
+            res["scanned"] = True
+        elif e.code in (401, 403):
+            res["status"] = "Chave de API do VirusTotal inválida ou sem permissão"
+        elif e.code == 429:
+            res["status"] = "Limite de requisições da API VirusTotal atingido (4/min)"
+        else:
+            res["status"] = f"Erro VirusTotal (HTTP {e.code})"
+    except Exception as e:
+        res["status"] = f"Erro de conexão VT: {str(e)}"
+
+    return res
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def lookup_virustotal_file_hash(sha256: str, api_key: str) -> dict:
+    """Consulta detecção de malware de um hash SHA-256 no VirusTotal API v3."""
+    res = {
+        "scanned": False,
+        "malicious": 0,
+        "suspicious": 0,
+        "harmless": 0,
+        "undetected": 0,
+        "total_engines": 0,
+        "flagged_by": [],
+        "popular_threat_name": "",
+        "status": "Não consultado"
+    }
+    if not api_key or not sha256:
+        return res
+
+    try:
+        req = urllib.request.Request(
+            f"https://www.virustotal.com/api/v3/files/{sha256.strip()}",
+            headers={
+                "x-apikey": api_key.strip(),
+                "Accept": "application/json",
+                "User-Agent": "PhishingAnalyzer/1.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=6) as response:
+            if response.status == 200:
+                payload = json.loads(response.read().decode('utf-8'))
+                data = payload.get("data", {})
+                attr = data.get("attributes", {})
+                stats = attr.get("last_analysis_stats", {})
+                results = attr.get("last_analysis_results", {})
+                threat_class = attr.get("popular_threat_classification", {})
+                
+                res["scanned"] = True
+                res["malicious"] = stats.get("malicious", 0)
+                res["suspicious"] = stats.get("suspicious", 0)
+                res["harmless"] = stats.get("harmless", 0)
+                res["undetected"] = stats.get("undetected", 0)
+                res["total_engines"] = sum(stats.values()) if stats else 0
+                res["popular_threat_name"] = threat_class.get("suggested_threat_label", "")
+                
+                flagged = []
+                for engine, eng_data in results.items():
+                    category = eng_data.get("category", "")
+                    if category in ["malicious", "suspicious"]:
+                        flagged.append(f"{engine} ({eng_data.get('result', category)})")
+                res["flagged_by"] = flagged
+                res["status"] = "Concluído"
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            res["status"] = "Hash não catalogado (Arquivo nunca submetido ao VirusTotal)"
+            res["scanned"] = True
+        elif e.code in (401, 403):
+            res["status"] = "Chave de API do VirusTotal inválida ou sem permissão"
+        elif e.code == 429:
+            res["status"] = "Limite de requisições da API VirusTotal atingido (4/min)"
+        else:
+            res["status"] = f"Erro VirusTotal (HTTP {e.code})"
+    except Exception as e:
+        res["status"] = f"Erro de conexão VT: {str(e)}"
+
+    return res
+
 # ----------------- INTERFACE PRINCIPAL ----------------- #
 
 st.sidebar.markdown("## ⚙️ Configurações")
@@ -406,6 +538,20 @@ sua_equipe = st.sidebar.text_input(
     "🏢 Assinatura da Denúncia:",
     value="Equipe de Segurança da Informação (SOC / CSIRT)",
     help="Identificação que aparecerá no final do e-mail de denúncia."
+)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("## 🛡️ Antivírus & Reputação (VirusTotal)")
+vt_api_key = st.sidebar.text_input(
+    "🔑 Chave de API do VirusTotal (Opcional):",
+    value=os.environ.get("VT_API_KEY", ""),
+    type="password",
+    help="Insira sua chave gratuita do VirusTotal para checar links e anexos em 70+ antivírus."
+)
+consultar_vt = st.sidebar.checkbox(
+    "🔍 Checar Links e Anexos no VirusTotal",
+    value=bool(vt_api_key.strip()),
+    help="Habilita verificação automática de vírus e phishing via VirusTotal."
 )
 
 st.sidebar.markdown("---")
@@ -504,8 +650,8 @@ if uploaded_file is not None:
             if not alinhamento_valido and not (autenticacao_valida and auth_info["dmarc"] == "PASS"):
                 spoofing_detectado = True
 
-        # 7. Consultas WHOIS & RDAP
-        with st.spinner("🔍 Consultando bases WHOIS e RDAP para identificar provedores e contatos de abuse..."):
+        # 7. Consultas WHOIS, RDAP e VirusTotal
+        with st.spinner("🔍 Consultando WHOIS, RDAP e reputação no VirusTotal..."):
             # WHOIS do IP de Origem
             ip_info = lookup_ip_rdap(ip_origem) if ip_origem != "Não identificado" else {}
             
@@ -522,6 +668,24 @@ if uploaded_file is not None:
             remetente_whois = lookup_domain_whois(remetente_dominio)
             for email_ab in remetente_whois.get("abuse_emails", []):
                 todos_abuse_links.add(email_ab)
+
+            # Consultas VirusTotal para Links
+            vt_links_detectados_maliciosos = 0
+            if vt_api_key and consultar_vt:
+                for l in links_detectados[:6]:
+                    vt_res = lookup_virustotal_url(l["url"], vt_api_key)
+                    l["vt"] = vt_res
+                    if vt_res.get("malicious", 0) > 0:
+                        vt_links_detectados_maliciosos += 1
+
+            # Consultas VirusTotal para Anexos (via Hash SHA-256)
+            vt_anexos_detectados_maliciosos = 0
+            if vt_api_key and consultar_vt:
+                for a in anexos:
+                    vt_f_res = lookup_virustotal_file_hash(a["sha256"], vt_api_key)
+                    a["vt"] = vt_f_res
+                    if vt_f_res.get("malicious", 0) > 0:
+                        vt_anexos_detectados_maliciosos += 1
 
         # 8. Destinatários Sugeridos para Denúncia
         destinatarios_to = []
@@ -553,6 +717,10 @@ if uploaded_file is not None:
             motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
         if any(a.get("is_suspicious") for a in anexos):
             motivos_risco.append("⚠️ Anexo com extensão de alto risco detectado")
+        if vt_links_detectados_maliciosos > 0:
+            motivos_risco.append(f"🚨 {vt_links_detectados_maliciosos} link(s) confirmado(s) como MALICIOSO(S) pelo VirusTotal!")
+        if vt_anexos_detectados_maliciosos > 0:
+            motivos_risco.append(f"🚨 {vt_anexos_detectados_maliciosos} anexo(s) confirmado(s) como MALWARE pelo VirusTotal!")
             
         st.markdown("---")
         col_res1, col_res2 = st.columns([1, 2])
@@ -592,7 +760,7 @@ DETALHES DO INCIDENTE:
 
 INDICADORES DE COMPROMETIMENTO (IOCs):
 ==================================================
-URLs e Domínios Maliciosos:
+URLs e Domínios Detectados:
 {links_formatados}
 
 Arquivos Anexados:
@@ -608,23 +776,23 @@ Atenciosamente,
 {sua_equipe}"""
         else:
             assunto_denuncia = f"[ABUSE REPORT] {tipo_incidente} - {sender_clean}"
-            corpo_denuncia = f"""Dear Security / Abuse Team,
+            corpo_denuncia = f"""Dear Security and Abuse Team,
 
-We would like to report a security incident ({tipo_incidente}) originating from or abusing your infrastructure.
+We are reporting a security incident ({tipo_incidente}) originating from infrastructure under your administration.
 
 INCIDENT DETAILS:
 ==================================================
 * Original Subject: {subject}
-* From: {sender_clean}
-* Return-Path: {defang_text(return_path) if (return_path and aplicar_defang) else (return_path or "N/A")}
-* Originating IP: {ip_clean}
-* IP Organization / ASN: {ip_info.get('org', 'Unidentified')} ({ip_info.get('asn', 'N/A')})
-* Date / Time: {data_hora}
-* Authentication: SPF: {auth_info['spf']} | DKIM: {auth_info['dkim']} | DMARC: {auth_info['dmarc']}
+* Sender (From): {sender_clean}
+* Envelope Sender (Return-Path): {defang_text(return_path) if (return_path and aplicar_defang) else (return_path or "N/A")}
+* Originating IP Address: {ip_clean}
+* IP Provider / ASN: {ip_info.get('org', 'Unknown')} ({ip_info.get('asn', 'N/A')})
+* Date / Time of Dispatch: {data_hora}
+* Authentication Status: SPF: {auth_info['spf']} | DKIM: {auth_info['dkim']} | DMARC: {auth_info['dmarc']}
 
 INDICATORS OF COMPROMISE (IOCs):
 ==================================================
-Detected URLs & Domains:
+Detected URLs and Domains:
 {links_formatados}
 
 Attachments:
@@ -672,7 +840,7 @@ Sincerely,
             "📋 Texto da Denúncia",
             "🛡️ Diagnóstico & Autenticação",
             "🌐 Inteligência WHOIS & IP",
-            "🔗 Links & Domínios",
+            "🔗 Links & Reputação",
             "📎 Anexos & Hashes",
             "📜 Cabeçalhos Brutos"
         ])
@@ -728,7 +896,9 @@ Sincerely,
                     st.write(f"{i}. `{rip}`")
 
         with tab_links:
-            st.subheader("URLs e Domínios Encontrados no Corpo da Mensagem")
+            st.subheader("URLs e Reputação em Antivírus (VirusTotal)")
+            if not vt_api_key:
+                st.info("💡 **Dica VirusTotal:** Para consultar automaticamente a reputação desses links em 70+ antivírus em tempo real, insira sua chave gratuita do VirusTotal na barra lateral.")
             if links_detectados:
                 for idx, l in enumerate(links_detectados, 1):
                     with st.container():
@@ -739,12 +909,29 @@ Sincerely,
                             st.markdown(f"- **Texto Âncora:** `{l['text']}`")
                         st.markdown(f"- **Destino Real:** `{l['url']}`")
                         st.markdown(f"- **Domínio:** `{l['domain']}`")
+                        
+                        vt = l.get("vt")
+                        if vt and vt.get("scanned"):
+                            mal = vt.get("malicious", 0)
+                            tot = vt.get("total_engines", 0)
+                            if mal > 0:
+                                st.error(f"🚨 **VirusTotal:** {mal}/{tot} antivírus detectaram ameaça! Flagged by: {', '.join(vt.get('flagged_by', [])[:4])}")
+                            elif tot > 0:
+                                st.success(f"🟢 **VirusTotal:** 0/{tot} antivírus detectaram ameaça (Link Limpo)")
+                            else:
+                                st.warning(f"⚪ **VirusTotal:** {vt.get('status', 'Sem detecções')}")
+                            if vt.get("url_id"):
+                                st.markdown(f"[🔗 Ver análise completa no VirusTotal](https://www.virustotal.com/gui/url/{vt['url_id']})")
+                        elif vt and vt.get("status"):
+                            st.caption(f"🛡️ VirusTotal: {vt['status']}")
+                        else:
+                            st.markdown(f"[🔗 Consultar no VirusTotal manualmente](https://www.virustotal.com/gui/search/{quote(l['url'])})")
                         st.divider()
             else:
                 st.info("Nenhuma URL externa encontrada no corpo da mensagem.")
 
         with tab_anexos:
-            st.subheader("Arquivos Anexados")
+            st.subheader("Arquivos Anexados e Reputação de Hashes")
             if anexos:
                 for a in anexos:
                     with st.expander(f"📁 {a['filename']} ({a['size_kb']})", expanded=a['is_suspicious']):
@@ -753,6 +940,21 @@ Sincerely,
                         st.write(f"- **Tipo MIME:** `{a['content_type']}`")
                         st.write(f"- **Tamanho:** `{a['size_kb']}`")
                         st.write(f"- **SHA-256:** `{a['sha256']}`")
+                        
+                        vt_f = a.get("vt")
+                        if vt_f and vt_f.get("scanned"):
+                            mal_f = vt_f.get("malicious", 0)
+                            tot_f = vt_f.get("total_engines", 0)
+                            if mal_f > 0:
+                                st.error(f"🚨 **VirusTotal:** {mal_f}/{tot_f} antivírus detectaram Malware ({vt_f.get('popular_threat_name', 'Malware')})! {', '.join(vt_f.get('flagged_by', [])[:4])}")
+                            elif tot_f > 0:
+                                st.success(f"🟢 **VirusTotal:** 0/{tot_f} antivírus detectaram ameaça (Hash Limpo)")
+                            else:
+                                st.info(f"⚪ **VirusTotal:** {vt_f.get('status', 'Sem detecções')}")
+                        elif vt_f and vt_f.get("status"):
+                            st.caption(f"🛡️ VirusTotal: {vt_f['status']}")
+                        
+                        st.markdown(f"[🔗 Consultar Hash SHA-256 no VirusTotal](https://www.virustotal.com/gui/file/{a['sha256']})")
             else:
                 st.info("Nenhum anexo encontrado nesta mensagem.")
 

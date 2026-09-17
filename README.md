@@ -14,8 +14,11 @@ Aplicação corporativa desenvolvida em **Streamlit** para análise forense simp
 - **Inteligência de WHOIS & RDAP**:
   - Consulta automática de provedor/hosting, ASN e e-mails de `abuse` para o **IP remetente**, o **domínio remetente** e os **domínios maliciosos nos links**.
 - **Inspeção de Links & URLs**:
-  - Extração com BeautifulSoup identificando links mascarados (*mismatched links* onde o texto exibido difere do link real).
+  - Identificação de links mascarados (*mismatched links* onde o texto exibido difere do link real).
   - Opção de **Desarmar URLs (Defanging)** (`hxxps://`, `[.]`) para envio seguro sem bloqueio por antivírus.
+- **🛡️ Integração com VirusTotal (API v3)**:
+  - Consulta reputação de URLs e links em mais de **70 motores de antivírus e feeds de ameaças** em tempo real.
+  - Verificação do hash **SHA-256** dos anexos contra a base global de malware do VirusTotal.
 - **Inspeção de Anexos**:
   - Lista arquivos anexados, tipo MIME, tamanho e calcula o hash **SHA-256**, alertando sobre extensões perigosas.
 - **Geração de Denúncias Prontas para Envio**:
