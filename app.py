@@ -111,52 +111,176 @@ def extract_origin_ips(msg) -> tuple[str, list[str]]:
     return main_ip, public_ips
 
 def parse_auth_results(msg) -> dict:
-    """Analisa os cabeçalhos Authentication-Results e Received-SPF para verificar SPF, DKIM e DMARC."""
+    """Analisa todos os cabeçalhos de autenticação (Authentication-Results, ARC, Received-SPF, DKIM-Signature)."""
     auth_data = {
         "spf": "Não identificado",
         "dkim": "Não identificado",
         "dmarc": "Não identificado",
-        "is_spoofed_suspect": False
+        "has_dkim_sig": False,
+        "is_spoofed_suspect": False,
+        "is_unauthenticated": False
     }
     
-    auth_results = str(msg.get("Authentication-Results", "") or "")
-    received_spf = str(msg.get("Received-SPF", "") or "")
+    headers_list = []
+    for h in ["Authentication-Results", "ARC-Authentication-Results", "Received-SPF", "X-Spam-Status", "X-MS-Exchange-Authentication-Results"]:
+        headers_list.extend(msg.get_all(h, []))
+        
+    combined = " ".join([str(h) for h in headers_list if h]).lower()
     
-    combined = f"{auth_results} {received_spf}".lower()
+    # Presença de assinatura DKIM física no cabeçalho
+    if msg.get("DKIM-Signature") or msg.get("DomainKey-Signature"):
+        auth_data["has_dkim_sig"] = True
     
     # SPF
     spf_match = re.search(r'spf=(\w+)', combined)
     if spf_match:
         auth_data["spf"] = spf_match.group(1).upper()
-    elif "spf: pass" in combined or "spf=pass" in combined:
+    elif "spf=pass" in combined or "spf: pass" in combined:
         auth_data["spf"] = "PASS"
-    elif "spf: fail" in combined or "spf=fail" in combined:
+    elif "spf=fail" in combined or "spf: fail" in combined:
         auth_data["spf"] = "FAIL"
-    elif "spf: softfail" in combined or "spf=softfail" in combined:
+    elif "spf=softfail" in combined or "spf: softfail" in combined:
         auth_data["spf"] = "SOFTFAIL"
+    elif "spf=neutral" in combined or "spf: neutral" in combined:
+        auth_data["spf"] = "NEUTRAL"
+    elif "spf=none" in combined or "spf: none" in combined:
+        auth_data["spf"] = "NONE"
         
     # DKIM
     dkim_match = re.search(r'dkim=(\w+)', combined)
     if dkim_match:
         auth_data["dkim"] = dkim_match.group(1).upper()
-    elif "dkim: pass" in combined or "dkim=pass" in combined:
+    elif "dkim=pass" in combined or "dkim: pass" in combined:
         auth_data["dkim"] = "PASS"
-    elif "dkim: fail" in combined or "dkim=fail" in combined:
+    elif "dkim=fail" in combined or "dkim: fail" in combined:
         auth_data["dkim"] = "FAIL"
+    elif "dkim=neutral" in combined or "dkim: neutral" in combined:
+        auth_data["dkim"] = "NEUTRAL"
+    elif "dkim=none" in combined or "dkim: none" in combined:
+        auth_data["dkim"] = "NONE"
         
     # DMARC
     dmarc_match = re.search(r'dmarc=(\w+)', combined)
     if dmarc_match:
         auth_data["dmarc"] = dmarc_match.group(1).upper()
-    elif "dmarc: pass" in combined or "dmarc=pass" in combined:
+    elif "dmarc=pass" in combined or "dmarc: pass" in combined:
         auth_data["dmarc"] = "PASS"
-    elif "dmarc: fail" in combined or "dmarc=fail" in combined:
+    elif "dmarc=fail" in combined or "dmarc: fail" in combined:
         auth_data["dmarc"] = "FAIL"
+    elif "dmarc=none" in combined or "dmarc: none" in combined:
+        auth_data["dmarc"] = "NONE"
         
     if auth_data["spf"] in ["FAIL", "SOFTFAIL"] or auth_data["dkim"] == "FAIL" or auth_data["dmarc"] == "FAIL":
         auth_data["is_spoofed_suspect"] = True
         
+    if auth_data["spf"] in ["Não identificado", "NONE"] and auth_data["dkim"] in ["Não identificado", "NONE"] and auth_data["dmarc"] in ["Não identificado", "NONE"]:
+        auth_data["is_unauthenticated"] = True
+        
     return auth_data
+
+
+def analyze_social_engineering(subject: str, body_text: str, from_display: str) -> dict:
+    """
+    Analisa heurística e semanticamente o texto do e-mail em busca de padrões de
+    Engenharia Social, Golpes Financeiros (PIX), Fraude do CEO (BEC) e Extorsão.
+    """
+    content = f"{subject}\n{body_text}\n{from_display}".lower()
+    
+    categories = [
+        {
+            "id": "financeiro_pix",
+            "nome": "💰 Cobrança / PIX / Fraude Financeira",
+            "peso": 3,
+            "patterns": [
+                r'\b(?:chave\s+)?pix\b',
+                r'\btransfer[êe]ncia\s+(?:banc[áa]ria|ted|doc|imediata|urgente)\b',
+                r'\b(?:dados|conta|ag[êe]ncia)\s+para\s+(?:dep[óo]sito|transfer[êe]ncia|pagamento)\b',
+                r'\b(?:altera[çc][ãa]o|mudan[çc]a|nova)\s+(?:conta|dados\s+banc[áa]rios|chave\s+pix|chave)\b',
+                r'\b(?:fatura|boleto|duplicata|recibo|comprovante|nota\s+fiscal)\s+(?:pendente|vencid[ao]|em\s+aberto|anex[ao]|atrasad[ao])\b',
+                r'\b(?:efetuar|realizar|confirmar|liquidar)\s+(?:o\s+)?pagamento\b',
+                r'\b(?:wire\s+transfer|bank\s+transfer|payment\s+due|invoice\s+attached|bank\s+details|remittance)\b',
+                r'\b(?:reembolso|estorno|indeniza[çc][ãa]o|devolu[çc][ãa]o)\s+(?:dispon[íi]vel|pendente|aprovad[ao])\b',
+            ],
+            "matches": []
+        },
+        {
+            "id": "urgencia_coacao",
+            "nome": "⏳ Urgência & Pressão Psicológica",
+            "peso": 2,
+            "patterns": [
+                r'\b(?:urgente|urg[êe]ncia|imediato|imediatamente|prazo\s+final|o\s+quanto\s+antes)\b',
+                r'\b(?:bloqueio|suspens[ãa]o|cancelamento|desativa[çc][ãa]o)\s+(?:em\s+24h|imediato|da\s+conta|do\s+acesso|do\s+servi[çc]o)\b',
+                r'\b(?:a[çc][ãa]o\s+necess[áa]ria|aten[çc][ãa]o\s+imediata|evite\s+o\s+bloqueio|regularize\s+j[áa])\b',
+                r'\b(?:[úu]ltimo\s+aviso|regularize\s+agora|antes\s+que\s+seja\s+tarde|sob\s+pena\s+de)\b',
+                r'\b(?:urgent\s+action\s+required|account\s+suspended|immediate\s+response|final\s+notice|action\s+required)\b',
+            ],
+            "matches": []
+        },
+        {
+            "id": "credenciais_acesso",
+            "nome": "🔑 Tentativa de Roubo de Credenciais / TI / RH",
+            "peso": 3,
+            "patterns": [
+                r'\b(?:redefinir|atualizar|confirmar|validar|trocar|recadastrar)\s+(?:sua\s+)?(?:senha|acesso|cadastro|token|mfa|2fa)\b',
+                r'\b(?:senha|acesso|certificado|token)\s+(?:expirad[ao]|expira\s+hoje|expira\s+em\s+breve)\b',
+                r'\b(?:atualiza[çc][ãa]o|recadastramento)\s+(?:cadastral\s+)?obrigat[óo]ri[ao]\b',
+                r'\b(?:verifique|confirme)\s+sua\s+identidade\b',
+                r'\b(?:password\s+expired|reset\s+password|verify\s+your\s+account|update\s+credentials)\b',
+            ],
+            "matches": []
+        },
+        {
+            "id": "fraude_executiva_bec",
+            "nome": "👔 Fraude do CEO / Diretoria (Executive BEC)",
+            "peso": 3,
+            "patterns": [
+                r'\b(?:voc[êe]\s+est[áa]\s+dispon[íi]vel|est[áa]\s+na\s+empresa|est[áa]\s+na\s+mesa|t[áa]\s+por\s+a[íi])\b',
+                r'\b(?:preciso\s+de\s+um\s+favor\s+urgente|preciso\s+que\s+fa[çc]a\s+algo\s+urgente|ajuda\s+urgente)\b',
+                r'\b(?:estou\s+em\s+reuni[ãa]o|estou\s+em\s+confer[êe]ncia|n[ãa]o\s+posso\s+atender|n[ãa]o\s+posso\s+falar)\b',
+                r'\b(?:trate\s+com\s+sigilo|n[ãa]o\s+comente\s+com\s+ningu[ée]m|estritamente\s+confidencial)\b',
+                r'\b(?:are\s+you\s+available|need\s+an\s+urgent\s+favor|in\s+a\s+meeting\s+text\s+me)\b',
+            ],
+            "matches": []
+        },
+        {
+            "id": "extorsao_ameaca",
+            "nome": "⚠️ Intimidação / Extorsão / Chantagem",
+            "peso": 4,
+            "patterns": [
+                r'\b(?:gravei\s+sua\s+tela|tenho\s+v[íi]deo\s+seu|sua\s+c[âa]mera\s+foi\s+hackeada)\b',
+                r'\b(?:conhe[çc]o\s+sua\s+senha|tenho\s+acesso\s+ao\s+seu\s+(?:computador|dispositivo|sistema))\b',
+                r'\b(?:carteira\s+bitcoin|pague\s+em\s+btc|envie\s+bitcoin)\b',
+                r'\b(?:seus\s+contatos\s+receber[ãa]o|divulgarei\s+seus\s+dados|vazamento\s+de\s+dados)\b',
+            ],
+            "matches": []
+        }
+    ]
+    
+    total_score = 0
+    detected = []
+    
+    for cat in categories:
+        found_matches = []
+        for pat in cat["patterns"]:
+            m = re.findall(pat, content)
+            if m:
+                for item in m:
+                    clean_item = item.strip()
+                    if clean_item and clean_item not in found_matches:
+                        found_matches.append(clean_item)
+        if found_matches:
+            cat_copy = dict(cat)
+            cat_copy["matches"] = found_matches
+            total_score += cat_copy["peso"] * len(found_matches)
+            detected.append(cat_copy)
+            
+    is_detected = total_score >= 2 or len(detected) >= 1
+    
+    return {
+        "score": total_score,
+        "is_detected": is_detected,
+        "categories": detected
+    }
 
 
 def defang_text(text: str) -> str:
@@ -675,6 +799,9 @@ if uploaded_file is not None:
             if not alinhamento_valido and not (autenticacao_valida and auth_info["dmarc"] == "PASS"):
                 spoofing_detectado = True
 
+        # Análise de Engenharia Social (BEC / Golpes por Texto)
+        social_eng = analyze_social_engineering(subject, body_text, from_display)
+
         # 7. Consultas WHOIS, RDAP e VirusTotal
         with st.spinner("🔍 Consultando WHOIS, RDAP e reputação no VirusTotal..."):
             # WHOIS do IP de Origem
@@ -734,35 +861,79 @@ if uploaded_file is not None:
         to_str = ", ".join(destinatarios_to)
         cc_str = ", ".join(destinatarios_cc)
 
-        # --- AVALIAÇÃO DE RISCO ---
+        # --- AVALIAÇÃO DE RISCO ASSERTIVA ---
         motivos_risco = []
-        if spoofing_detectado:
-            motivos_risco.append("⚠️ Possível Remetente Forjado (Spoofing) ou Falha em SPF/DKIM/DMARC")
-        if any(l.get("mismatched") for l in links_detectados):
-            motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
-        if any(a.get("is_suspicious") for a in anexos):
-            motivos_risco.append("⚠️ Anexo com extensão de alto risco detectado")
+        motivos_atencao = []
+        
+        # 1. Alertas Críticos / Alto Risco
         if vt_links_detectados_maliciosos > 0:
             motivos_risco.append(f"🚨 {vt_links_detectados_maliciosos} link(s) confirmado(s) como MALICIOSO(S) pelo VirusTotal!")
         if vt_anexos_detectados_maliciosos > 0:
             motivos_risco.append(f"🚨 {vt_anexos_detectados_maliciosos} anexo(s) confirmado(s) como MALWARE pelo VirusTotal!")
+        if any(a.get("is_suspicious") for a in anexos):
+            motivos_risco.append("⚠️ Anexo com extensão de alto risco detectado (.exe, .iso, .zip, etc.)")
+        if any(l.get("mismatched") for l in links_detectados):
+            motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
+        if spoofing_detectado:
+            motivos_risco.append("⚠️ Remetente Forjado (Spoofing) ou Falha Crítica em SPF/DKIM/DMARC")
+            
+        # 2. Alertas de Engenharia Social / BEC
+        if social_eng["is_detected"]:
+            cats_str = ", ".join([c["nome"] for c in social_eng["categories"]])
+            if auth_info["is_unauthenticated"] or spoofing_detectado or social_eng["score"] >= 4:
+                motivos_risco.append(f"🚨 Engenharia Social / BEC Detectada: {cats_str}")
+            else:
+                motivos_atencao.append(f"⚠️ Indícios de Engenharia Social / Persuasão: {cats_str}")
+                
+        # 3. Alertas de Falta de Autenticação
+        if auth_info["is_unauthenticated"]:
+            motivos_atencao.append("⚠️ Remetente Não Autenticado: Mensagem sem registros válidos de SPF/DKIM (identidade não comprovada).")
+            
+        # Classificação Final Assertiva do Diagnóstico
+        if motivos_risco:
+            diagnostico_titulo = "🔴 Suspeita / Phishing"
+            diagnostico_delta = "Alto Risco"
+            diagnostico_cor = "inverse"
+        elif motivos_atencao and social_eng["is_detected"]:
+            diagnostico_titulo = "🟠 Suspeita de Engenharia Social (BEC)"
+            diagnostico_delta = "Alerta por Texto / Persuasão"
+            diagnostico_cor = "inverse"
+        elif motivos_atencao or auth_info["is_unauthenticated"]:
+            diagnostico_titulo = "🟡 Remetente Não Autenticado"
+            diagnostico_delta = "Identidade Não Comprovada"
+            diagnostico_cor = "normal"
+        elif autenticacao_valida and (alinhamento_valido or auth_info["dmarc"] == "PASS"):
+            diagnostico_titulo = "🟢 Autêntica / Legítima"
+            diagnostico_delta = "SPF, DKIM e DMARC Válidos"
+            diagnostico_cor = "normal"
+        else:
+            diagnostico_titulo = "🟡 Análise Inconclusiva"
+            diagnostico_delta = "Verificar Detalhes"
+            diagnostico_cor = "normal"
             
         st.markdown("---")
         col_res1, col_res2 = st.columns([1, 2])
         with col_res1:
-            if motivos_risco:
-                st.metric(label="Diagnóstico da Mensagem", value="🔴 Suspeita / Phishing", delta="Alto Risco", delta_color="inverse")
-            elif autenticacao_valida and (alinhamento_valido or auth_info["dmarc"] == "PASS"):
-                st.metric(label="Diagnóstico da Mensagem", value="🟢 Autêntica / Legítima", delta="SPF, DKIM e DMARC Válidos")
-            else:
-                st.metric(label="Diagnóstico da Mensagem", value="🟡 Sem Alertas Graves", delta="Informativa")
+            st.metric(label="Diagnóstico da Mensagem", value=diagnostico_titulo, delta=diagnostico_delta, delta_color=diagnostico_cor)
         with col_res2:
             st.markdown(f"**Assunto:** `{subject}`")
             st.markdown(f"**Remetente:** `{sender_email}` | **IP de Envio:** `{ip_origem}` ({ip_info.get('org', 'Desconhecido')})")
 
+        # Exibição de alertas destacados no topo
+        if motivos_risco:
+            for m in motivos_risco:
+                st.error(m)
+        elif motivos_atencao:
+            for m in motivos_atencao:
+                st.warning(m)
+
         # 9. GERAÇÃO DOS MODELOS DE DENÚNCIA
         links_formatados = "\n".join([f"- {defang_text(l['url']) if aplicar_defang else l['url']} (Domínio: {defang_text(l['domain']) if aplicar_defang else l['domain']})" for l in links_detectados]) if links_detectados else "Nenhum link detectado."
         anexos_formatados = "\n".join([f"- {a['filename']} (SHA256: {a['sha256']}, Tamanho: {a['size_kb']})" for a in anexos]) if anexos else "Nenhum anexo detectado."
+        
+        social_eng_text = ""
+        if social_eng["is_detected"]:
+            social_eng_text = "\nTáticas de Engenharia Social / BEC Identificadas:\n" + "\n".join([f"- {c['nome']}: Gatilhos encontrados ({', '.join(c['matches'])})" for c in social_eng["categories"]]) + "\n"
         
         sender_clean = defang_text(sender_email) if aplicar_defang else sender_email
         ip_clean = defang_text(ip_origem) if aplicar_defang else ip_origem
@@ -784,7 +955,7 @@ DETALHES DO INCIDENTE:
 * Autenticação: SPF: {auth_info['spf']} | DKIM: {auth_info['dkim']} | DMARC: {auth_info['dmarc']}
 
 INDICADORES DE COMPROMETIMENTO (IOCs):
-==================================================
+=================================================={social_eng_text}
 URLs e Domínios Detectados:
 {links_formatados}
 
@@ -816,7 +987,7 @@ INCIDENT DETAILS:
 * Authentication Status: SPF: {auth_info['spf']} | DKIM: {auth_info['dkim']} | DMARC: {auth_info['dmarc']}
 
 INDICATORS OF COMPROMISE (IOCs):
-==================================================
+=================================================={social_eng_text}
 Detected URLs and Domains:
 {links_formatados}
 
@@ -884,6 +1055,17 @@ Sincerely,
             with col_a3:
                 st.metric("DMARC", auth_info["dmarc"])
 
+            if auth_info["is_unauthenticated"]:
+                st.warning("⚠️ **MENSAGEM NÃO AUTENTICADA:** Este e-mail não possui assinaturas SPF, DKIM ou DMARC validadas. Qualquer servidor pode ter forjado o remetente.")
+
+            st.markdown("### 🧠 Análise de Engenharia Social & Padrões Psicológicos (BEC)")
+            if social_eng["is_detected"]:
+                st.error(f"🚨 **Padrões de Engenharia Social Detectados (Score de Risco: {social_eng['score']}):**")
+                for cat in social_eng["categories"]:
+                    st.markdown(f"- **{cat['nome']}**: Termos identificados: `{'`, `'.join(cat['matches'])}`")
+            else:
+                st.success("✅ Nenhum padrão agressivo de engenharia social, coerção psicológica ou cobrança fraudulenta foi detectado no texto.")
+
             st.markdown("### Análise de Identidade")
             st.markdown(f"- **From (Exibido):** `{from_raw}`")
             st.markdown(f"- **Return-Path (Envelope Real):** `{return_path_raw or 'Não especificado'}`")
@@ -895,7 +1077,7 @@ Sincerely,
                 st.success(f"✅ **MENSAGEM AUTÊNTICA:** O remetente (`{remetente_dominio}`) e o envelope (`{return_path_dominio}`) pertencem ao mesmo domínio/organização e todas as assinaturas criptográficas (SPF, DKIM e DMARC) foram validadas com sucesso (PASS).")
             elif autenticacao_valida:
                 st.success("✅ **AUTENTICAÇÃO APROVADA:** As assinaturas SPF, DKIM e DMARC foram validadas com sucesso (PASS).")
-            else:
+            elif not auth_info["is_unauthenticated"]:
                 st.info("ℹ️ Não foram encontradas divergências evidentes de identidade.")
 
         with tab_whois:
