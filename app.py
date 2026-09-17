@@ -547,14 +547,14 @@ sua_equipe = st.sidebar.text_input(
 st.sidebar.markdown("---")
 st.sidebar.markdown("## 🛡️ Antivírus & Reputação (VirusTotal)")
 vt_api_key = st.sidebar.text_input(
-    "🔑 Chave de API do VirusTotal (Opcional):",
-    value=os.environ.get("VT_API_KEY", ""),
+    "🔑 Chave de API do VirusTotal:",
+    value=os.environ.get("VT_API_KEY", "b3538350beb9c7d08e7c5f1b9e499a49190bc9ba1a606e39c997f0faa106bb06"),
     type="password",
-    help="Insira sua chave gratuita do VirusTotal para checar links e anexos em 70+ antivírus."
+    help="Chave de API do VirusTotal para checar links e anexos em 70+ antivírus."
 )
 consultar_vt = st.sidebar.checkbox(
     "🔍 Checar Links e Anexos no VirusTotal",
-    value=bool(vt_api_key.strip()),
+    value=True,
     help="Habilita verificação automática de vírus e phishing via VirusTotal."
 )
 
@@ -568,17 +568,9 @@ st.sidebar.markdown(
     """
 )
 
-# Cabeçalho Principal com Logo
-if os.path.exists("logo.png"):
-    col_hdr_logo, col_hdr_txt = st.columns([1, 4])
-    with col_hdr_logo:
-        st.image("logo.png", width=180)
-    with col_hdr_txt:
-        st.title("Central de Análise e Denúncia de Phishing & SPAM")
-        st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
-else:
-    st.title("🛡️ Central de Análise e Denúncia de Phishing & SPAM")
-    st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
+# Cabeçalho Principal
+st.title("🛡️ Central de Análise e Denúncia de Phishing & SPAM")
+st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
 
 uploaded_file = st.file_uploader("📂 Arraste ou selecione o arquivo .eml para análise", type=["eml"])
 
