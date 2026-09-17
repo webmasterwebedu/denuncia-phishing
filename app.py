@@ -9,7 +9,9 @@ import json
 import base64
 import os
 import urllib.request
-from urllib.parse import urlparse, quote
+import urllib.parse
+import urllib.error
+from urllib.parse import urlparse, quote, urlencode
 from html.parser import HTMLParser
 import whois
 
@@ -434,8 +436,7 @@ def lookup_virustotal_url(url: str, api_key: str) -> dict:
         if e.code == 404:
             # Submete a URL nova para análise no VirusTotal
             try:
-                import urllib.parse
-                post_data = urllib.parse.urlencode({"url": url}).encode("utf-8")
+                post_data = urlencode({"url": url}).encode("utf-8")
                 post_req = urllib.request.Request(
                     "https://www.virustotal.com/api/v3/urls",
                     data=post_data,
