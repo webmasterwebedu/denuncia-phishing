@@ -193,13 +193,65 @@ def parse_auth_results(msg) -> dict:
     elif "dmarc: none" in combined or "dmarc=none" in combined:
         auth_data["dmarc"] = "NONE"
         
-    # 4. Anti-Spam Gateways (Microsoft 365 / SpamAssassin)
-    if "sfv:spm" in combined or "sfv:blk" in combined or "cat:spm" in combined or "cat:phsh" in combined:
-        auth_data["spam_verdict"] = "🚨 Marcado como SPAM/Phishing pelo Microsoft 365 (SFV:SPM)"
-        auth_data["is_spam_flagged"] = True
-    elif "x-spam-flag: yes" in combined or "x-spam-status: yes" in combined:
-        auth_data["spam_verdict"] = "🚨 Marcado como SPAM pelo Filtro Anti-Spam Gateway"
-        auth_data["is_spam_flagged"] = True
+    # 4. Métricas Oficiais da Microsoft / Outlook / Office 365 (EOP & Defender)
+    ms_metrics = {}
+    
+    # CompAuth (Composite Authentication)
+    compauth_match = re.search(r'compauth\s*=\s*([a-z0-9_\-]+)', combined)
+    if compauth_match:
+        ms_metrics["compauth"] = compauth_match.group(1).upper()
+        if ms_metrics["compauth"] in ["FAIL", "SOFTFAIL"]:
+            auth_data["is_spoofed_suspect"] = True
+            
+    # SCL (Spam Confidence Level: -1, 0, 1, 5, 6, 9)
+    scl_match = re.search(r'scl[:=]\s*(-?[0-9]+)', combined)
+    if scl_match:
+        ms_metrics["scl"] = int(scl_match.group(1))
+        if ms_metrics["scl"] in [5, 6]:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = f"🚨 Marcado como SPAM pelo Outlook / Microsoft 365 (SCL: {ms_metrics['scl']})"
+        elif ms_metrics["scl"] >= 7:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = f"🚨 Marcado como SPAM/PHISHING de Alta Confiança pelo Microsoft 365 (SCL: {ms_metrics['scl']})"
+
+    # BCL (Bulk Complaint Level: 0-9)
+    bcl_match = re.search(r'bcl[:=]\s*([0-9]+)', combined)
+    if bcl_match:
+        ms_metrics["bcl"] = int(bcl_match.group(1))
+        if ms_metrics["bcl"] >= 6:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = f"🚨 Disparo em Massa Agressivo (Bulk) Detectado pelo Microsoft 365 (BCL: {ms_metrics['bcl']}/9)"
+
+    # PCL (Phishing Confidence Level)
+    pcl_match = re.search(r'pcl[:=]\s*([0-9]+)', combined)
+    if pcl_match:
+        ms_metrics["pcl"] = int(pcl_match.group(1))
+
+    # SFV & CAT (Spam Filtering Verdict & Category)
+    sfv_match = re.search(r'sfv[:=]\s*([a-z]+)', combined)
+    if sfv_match:
+        ms_metrics["sfv"] = sfv_match.group(1).upper()
+        if ms_metrics["sfv"] in ["SPM", "BLK", "SKS"]:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = f"🚨 Veredito de SPAM/Bloqueio pelo Microsoft 365 (SFV:{ms_metrics['sfv']})"
+
+    cat_match = re.search(r'cat[:=]\s*([a-z]+)', combined)
+    if cat_match:
+        ms_metrics["cat"] = cat_match.group(1).upper()
+        if ms_metrics["cat"] in ["PHSH", "HPHSH"]:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = f"🚨 Identificado como PHISHING pelo Microsoft 365 (CAT:{ms_metrics['cat']})"
+        elif ms_metrics["cat"] in ["MALW"]:
+            auth_data["is_spam_flagged"] = True
+            auth_data["spam_verdict"] = "🚨 Identificado como MALWARE pelo Microsoft 365 (CAT:MALW)"
+
+    # Outros gateways genéricos (SpamAssassin, Postfix)
+    if not auth_data["is_spam_flagged"]:
+        if "x-spam-flag: yes" in combined or "x-spam-status: yes" in combined:
+            auth_data["spam_verdict"] = "🚨 Marcado como SPAM pelo Gateway de E-mail (SpamAssassin)"
+            auth_data["is_spam_flagged"] = True
+        
+    auth_data["ms_metrics"] = ms_metrics
         
     if auth_data["spf"] in ["FAIL", "SOFTFAIL"] or auth_data["dkim"] == "FAIL" or auth_data["dmarc"] == "FAIL":
         auth_data["is_spoofed_suspect"] = True
@@ -962,6 +1014,23 @@ Sincerely,
 
             if reply_to_divergente:
                 st.warning(f"⚠️ **REPLY-TO DIVERGENTE:** As respostas serão direcionadas para `{reply_to}`, que difere do remetente exibido `{sender_email}`.")
+
+            # Métricas Oficiais do Microsoft Outlook / Exchange (se presentes no EML)
+            ms_m = auth_info.get("ms_metrics", {})
+            if ms_m:
+                st.markdown("### 🔷 Classificação Oficial Microsoft 365 / Outlook (EOP & Defender)")
+                m_cols = st.columns(len(ms_m))
+                for i, (k, v) in enumerate(ms_m.items()):
+                    with m_cols[i]:
+                        label = {
+                            "compauth": "CompAuth (Spoof)",
+                            "scl": "SCL (Spam Level)",
+                            "bcl": "BCL (Bulk Level)",
+                            "pcl": "PCL (Phish Level)",
+                            "sfv": "SFV (Verdict)",
+                            "cat": "CAT (Categoria)"
+                        }.get(k, k.upper())
+                        st.metric(label, str(v))
 
         with tab_whois:
             st.subheader("Informações do Servidor de Origem e Provedores")
