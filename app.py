@@ -111,50 +111,101 @@ def extract_origin_ips(msg) -> tuple[str, list[str]]:
     return main_ip, public_ips
 
 def parse_auth_results(msg) -> dict:
-    """Analisa os cabeçalhos Authentication-Results e Received-SPF para verificar SPF, DKIM e DMARC."""
+    """Analisa exaustivamente todos os cabeçalhos de autenticação e verdicts de antispam."""
     auth_data = {
         "spf": "Não identificado",
         "dkim": "Não identificado",
         "dmarc": "Não identificado",
-        "is_spoofed_suspect": False
+        "spam_verdict": None,
+        "is_spoofed_suspect": False,
+        "is_spam_flagged": False,
+        "is_unauthenticated": False
     }
     
-    auth_results = str(msg.get("Authentication-Results", "") or "")
-    received_spf = str(msg.get("Received-SPF", "") or "")
+    headers_to_check = [
+        "Authentication-Results",
+        "ARC-Authentication-Results",
+        "Received-SPF",
+        "X-MS-Exchange-Authentication-Results",
+        "X-Spam-Status",
+        "X-Spam-Flag",
+        "X-Spam-Report",
+        "X-Forefront-Antispam-Report",
+        "X-Microsoft-Antispam",
+        "Received"
+    ]
     
-    combined = f"{auth_results} {received_spf}".lower()
+    all_headers_text = []
+    for h in headers_to_check:
+        values = msg.get_all(h, [])
+        for v in values:
+            if v:
+                all_headers_text.append(f"{h}: {str(v)}")
+                
+    combined = "\n".join(all_headers_text).lower()
     
-    # SPF
-    spf_match = re.search(r'spf=(\w+)', combined)
+    # 1. SPF
+    spf_match = re.search(r'spf\s*=\s*([a-z0-9_\-]+)', combined)
     if spf_match:
-        auth_data["spf"] = spf_match.group(1).upper()
-    elif "spf: pass" in combined or "spf=pass" in combined:
+        val = spf_match.group(1).upper()
+        if val in ["PASS", "FAIL", "SOFTFAIL", "NEUTRAL", "NONE", "PERMERROR", "TEMPERROR"]:
+            auth_data["spf"] = val
+    elif "spf: pass" in combined or "spf=pass" in combined or "received-spf: pass" in combined:
         auth_data["spf"] = "PASS"
-    elif "spf: fail" in combined or "spf=fail" in combined:
+    elif "spf: fail" in combined or "spf=fail" in combined or "received-spf: fail" in combined:
         auth_data["spf"] = "FAIL"
-    elif "spf: softfail" in combined or "spf=softfail" in combined:
+    elif "spf: softfail" in combined or "spf=softfail" in combined or "received-spf: softfail" in combined:
         auth_data["spf"] = "SOFTFAIL"
+    elif "spf: neutral" in combined or "spf=neutral" in combined:
+        auth_data["spf"] = "NEUTRAL"
+    elif "spf: none" in combined or "spf=none" in combined or "received-spf: none" in combined:
+        auth_data["spf"] = "NONE"
         
-    # DKIM
-    dkim_match = re.search(r'dkim=(\w+)', combined)
+    # 2. DKIM
+    dkim_match = re.search(r'dkim\s*=\s*([a-z0-9_\-]+)', combined)
     if dkim_match:
-        auth_data["dkim"] = dkim_match.group(1).upper()
+        val = dkim_match.group(1).upper()
+        if val in ["PASS", "FAIL", "NEUTRAL", "NONE", "PERMERROR", "TEMPERROR"]:
+            auth_data["dkim"] = val
     elif "dkim: pass" in combined or "dkim=pass" in combined:
         auth_data["dkim"] = "PASS"
     elif "dkim: fail" in combined or "dkim=fail" in combined:
         auth_data["dkim"] = "FAIL"
+    elif "dkim: none" in combined or "dkim=none" in combined:
+        auth_data["dkim"] = "NONE"
         
-    # DMARC
-    dmarc_match = re.search(r'dmarc=(\w+)', combined)
+    if auth_data["dkim"] == "Não identificado":
+        if msg.get("DKIM-Signature") or msg.get("DomainKey-Signature"):
+            auth_data["dkim"] = "ASSINADO (Não validado)"
+        else:
+            auth_data["dkim"] = "NÃO ASSINADO (Ausente)"
+            
+    # 3. DMARC
+    dmarc_match = re.search(r'dmarc\s*=\s*([a-z0-9_\-]+)', combined)
     if dmarc_match:
-        auth_data["dmarc"] = dmarc_match.group(1).upper()
+        val = dmarc_match.group(1).upper()
+        if val in ["PASS", "FAIL", "NONE", "PERMERROR", "TEMPERROR", "BESTGUESS"]:
+            auth_data["dmarc"] = val
     elif "dmarc: pass" in combined or "dmarc=pass" in combined:
         auth_data["dmarc"] = "PASS"
     elif "dmarc: fail" in combined or "dmarc=fail" in combined:
         auth_data["dmarc"] = "FAIL"
+    elif "dmarc: none" in combined or "dmarc=none" in combined:
+        auth_data["dmarc"] = "NONE"
+        
+    # 4. Anti-Spam Gateways (Microsoft 365 / SpamAssassin)
+    if "sfv:spm" in combined or "sfv:blk" in combined or "cat:spm" in combined or "cat:phsh" in combined:
+        auth_data["spam_verdict"] = "🚨 Marcado como SPAM/Phishing pelo Microsoft 365 (SFV:SPM)"
+        auth_data["is_spam_flagged"] = True
+    elif "x-spam-flag: yes" in combined or "x-spam-status: yes" in combined:
+        auth_data["spam_verdict"] = "🚨 Marcado como SPAM pelo Filtro Anti-Spam Gateway"
+        auth_data["is_spam_flagged"] = True
         
     if auth_data["spf"] in ["FAIL", "SOFTFAIL"] or auth_data["dkim"] == "FAIL" or auth_data["dmarc"] == "FAIL":
         auth_data["is_spoofed_suspect"] = True
+        
+    if auth_data["spf"] in ["Não identificado", "NONE", "NEUTRAL"] and auth_data["dkim"] in ["Não identificado", "NONE", "NÃO ASSINADO (Ausente)"] and auth_data["dmarc"] in ["Não identificado", "NONE"]:
+        auth_data["is_unauthenticated"] = True
         
     return auth_data
 
@@ -668,6 +719,7 @@ if uploaded_file is not None:
         spoofing_detectado = False
         autenticacao_valida = (auth_info["spf"] == "PASS" and auth_info["dkim"] == "PASS" and auth_info["dmarc"] == "PASS")
         alinhamento_valido = are_domains_aligned(return_path_dominio, remetente_dominio)
+        reply_to_divergente = bool(reply_to and reply_to.lower().strip() != sender_email.lower().strip())
         
         if auth_info["is_spoofed_suspect"]:
             spoofing_detectado = True
@@ -736,8 +788,14 @@ if uploaded_file is not None:
 
         # --- AVALIAÇÃO DE RISCO ---
         motivos_risco = []
+        if auth_info.get("is_spam_flagged"):
+            motivos_risco.append(auth_info["spam_verdict"])
         if spoofing_detectado:
             motivos_risco.append("⚠️ Possível Remetente Forjado (Spoofing) ou Falha em SPF/DKIM/DMARC")
+        if auth_info.get("is_unauthenticated"):
+            motivos_risco.append("⚠️ Mensagem Não Autenticada (Sem registros válidos de SPF/DKIM/DMARC)")
+        if reply_to_divergente:
+            motivos_risco.append(f"⚠️ Reply-To Divergente do Remetente (`{reply_to}` != `{sender_email}`)")
         if any(l.get("mismatched") for l in links_detectados):
             motivos_risco.append("⚠️ Link Discrepante Detectado (Texto âncora difere do destino real)")
         if any(a.get("is_suspicious") for a in anexos):
@@ -891,12 +949,19 @@ Sincerely,
             
             if spoofing_detectado:
                 st.error("⚠️ **ALERTA DE SPOOFING / REMETENTE FORJADO:** Houve divergência entre o remetente visível e o envelope real ou falha na validação SPF/DKIM/DMARC.")
+            elif auth_info.get("is_spam_flagged"):
+                st.error(auth_info["spam_verdict"])
+            elif auth_info.get("is_unauthenticated"):
+                st.warning("⚠️ **MENSAGEM NÃO AUTENTICADA:** Este e-mail não possui assinaturas SPF, DKIM ou DMARC validadas. Qualquer servidor pode ter disparado este envio sem autorização do domínio.")
             elif autenticacao_valida and alinhamento_valido:
                 st.success(f"✅ **MENSAGEM AUTÊNTICA:** O remetente (`{remetente_dominio}`) e o envelope (`{return_path_dominio}`) pertencem ao mesmo domínio/organização e todas as assinaturas criptográficas (SPF, DKIM e DMARC) foram validadas com sucesso (PASS).")
             elif autenticacao_valida:
                 st.success("✅ **AUTENTICAÇÃO APROVADA:** As assinaturas SPF, DKIM e DMARC foram validadas com sucesso (PASS).")
             else:
                 st.info("ℹ️ Não foram encontradas divergências evidentes de identidade.")
+
+            if reply_to_divergente:
+                st.warning(f"⚠️ **REPLY-TO DIVERGENTE:** As respostas serão direcionadas para `{reply_to}`, que difere do remetente exibido `{sender_email}`.")
 
         with tab_whois:
             st.subheader("Informações do Servidor de Origem e Provedores")
