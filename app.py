@@ -688,7 +688,7 @@ st.sidebar.markdown(
     **📌 Recomendações:**
     - Nunca acesse links suspeitos em sua estação de trabalho.
     - Se possível, anexe o arquivo `.eml` original na denúncia.
-    - Notifique também o [CERT.br](https://www.cert.br/) em `mail-abuse@cert.br`.
+    - Notifique também o [CERT.br](https://www.cert.br/) em [`mail-abuse@cert.br`](mailto:mail-abuse@cert.br).
     """
 )
 
@@ -711,6 +711,11 @@ if uploaded_file is None:
         ### 🌐 Inteligência de WHOIS e Provedores
         * **Consulta automática de IP / RDAP** (identifica se veio de AWS, DigitalOcean, Locaweb, etc.).
         * **Consulta de WHOIS de Domínios** dos links no corpo do e-mail.
+
+        ### 📌 Recomendações:
+        * **Nunca acesse links suspeitos** em sua estação de trabalho.
+        * **Se possível, anexe o arquivo `.eml` original** na denúncia.
+        * **Notifique também o [CERT.br](https://www.cert.br/)** em [`mail-abuse@cert.br`](mailto:mail-abuse@cert.br).
         """)
         
     with col_info2:
