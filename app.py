@@ -716,6 +716,12 @@ if uploaded_file is None:
         * **Botão ✉️ Denunciar por E-mail:** Abre o cliente de e-mail com tudo preenchido em 1 clique.
         * **Desarmamento de URLs (Defang):** Previne cliques acidentais e bloqueio por antivírus (`hxxps://`, `[.]`).
         * **Inspeção de Anexos:** Cálculo de hash **SHA-256** e alerta de arquivos de alto risco (`.exe`, `.iso`, `.zip`, etc.).
+
+        ### 🔒 Seu Upload Não Fica no Servidor
+        * **Processamento 100% em Memória RAM:** O arquivo `.eml` é lido diretamente através de um buffer temporário na memória volátil (`BytesIO`).
+        * **Nenhum arquivo gravado em disco:** A aplicação não cria nem salva nenhum arquivo no servidor, pastas ou bancos de dados.
+        * **Limpeza Automática (Garbage Collection):** Assim que você atualiza a página, remove o arquivo ou fecha a aba do navegador, a memória é liberada imediatamente pelo Python.
+        * **Em conformidade com LGPD / Privacidade:** Nenhum dado pessoal, corpo de mensagem ou anexo permanece armazenado no ambiente.
         """)
 
 if uploaded_file is not None:
