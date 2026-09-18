@@ -682,16 +682,6 @@ consultar_vt = st.sidebar.checkbox(
     help="Habilita verificação automática de vírus e phishing via VirusTotal."
 )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    """
-    **📌 Recomendações:**
-    - Nunca acesse links suspeitos em sua estação de trabalho.
-    - Se possível, anexe o arquivo `.eml` original na denúncia.
-    - Notifique também o [CERT.br](https://www.cert.br/) em [`mail-abuse@cert.br`](mailto:mail-abuse@cert.br).
-    """
-)
-
 # Cabeçalho Principal
 st.title("🛡️ Central de Análise e Denúncia de Phishing & SPAM")
 st.markdown("Faça o upload de uma mensagem `.eml` para extrair indicadores técnicos (IOCs), consultar WHOIS/RDAP e gerar a denúncia pronta para os órgãos de segurança.")
